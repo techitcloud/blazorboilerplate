@@ -35,6 +35,7 @@ using Microsoft.AspNetCore.Blazor.Http;
 using Microsoft.AspNetCore.Components.Builder;
 using System.Net.Http;
 using Microsoft.AspNetCore.Components;
+using EmbeddedBlazorContent;
 
 namespace BlazorBoilerplate.Server
 {
@@ -266,7 +267,7 @@ namespace BlazorBoilerplate.Server
             // NSwag
             app.UseOpenApi();
             app.UseSwaggerUi3();
-
+            app.UseEmbeddedBlazorContent(typeof(MatBlazor.BaseMatComponent).Assembly);
 
             WebAssemblyHttpMessageHandler.DefaultCredentials = FetchCredentialsOption.Include;
             //clientApp.UseLoadingBar();
