@@ -8,6 +8,7 @@ using BlazorBoilerplate.Server.Middleware;
 using BlazorBoilerplate.Server.Models;
 using BlazorBoilerplate.Server.Services;
 using BlazorBoilerplate.Shared.AuthorizationDefinitions;
+using MatBlazor;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
@@ -24,6 +25,16 @@ using System;
 using System.Linq;
 using System.Net;
 using System.Threading.Tasks;
+//using Toolbelt.Blazor.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Components.Authorization;
+using BlazorBoilerplate.Server.Services.Contracts;
+using BlazorBoilerplate.Server.Services.Implementations;
+using BlazorBoilerplate.Server.States;
+using BlazorBoilerplate.Server;
+using Microsoft.AspNetCore.Blazor.Http;
+using Microsoft.AspNetCore.Components.Builder;
+using System.Net.Http;
+using Microsoft.AspNetCore.Components;
 
 namespace BlazorBoilerplate.Server
 {
@@ -40,6 +51,13 @@ namespace BlazorBoilerplate.Server
         // For more information on how to configure your application, visit https://go.microsoft.com/fwlink/?LinkID=398940
         public void ConfigureServices(IServiceCollection services)
         {
+            services.AddAuthorizationCore(config =>
+            {
+                config.AddPolicy(Policies.IsAdmin, Policies.IsAdminPolicy());
+                config.AddPolicy(Policies.IsUser, Policies.IsUserPolicy());
+                config.AddPolicy(Policies.IsReadOnly, Policies.IsUserPolicy());
+                // config.AddPolicy(Policies.IsMyDomain, Policies.IsMyDomainPolicy());  Only works on the server end
+            });
             services.AddDbContext<ApplicationDbContext>(options => {
                 if (Convert.ToBoolean(Configuration["BlazorBoilerplate:UseSqlServer"] ?? "false"))
                 {
@@ -120,8 +138,32 @@ namespace BlazorBoilerplate.Server
                 };
             });
 
-            services.AddControllers().AddNewtonsoftJson();
+            services.AddMvc().AddNewtonsoftJson();
             services.AddSignalR();
+            services.AddServerSideBlazor();
+
+            // Setup HttpClient for server side in a client side compatible fashion
+            services.AddScoped<HttpClient>(s =>
+            {
+                try
+                {
+                    // Creating the URI helper needs to wait until the JS Runtime is initialized, so defer it.
+                    var uriHelper = s.GetRequiredService<NavigationManager>();
+                    return new HttpClient
+                    {
+                        BaseAddress = new Uri(uriHelper.BaseUri)
+                    };
+                }
+                catch (Exception)
+                {
+                    return new HttpClient
+                    {
+                        BaseAddress = new Uri("http://localhost:54444/")
+                    };
+                }
+
+
+            });
 
             services.AddSwaggerDocument(config =>
             {
@@ -142,6 +184,25 @@ namespace BlazorBoilerplate.Server
             services.AddSingleton<IHttpContextAccessor, HttpContextAccessor>();
             services.AddScoped<IUserSession, UserSession>();
             services.AddSingleton<IEmailConfiguration>(Configuration.GetSection("EmailConfiguration").Get<EmailConfiguration>());
+
+            //CSB
+            services.AddScoped<IdentityAuthenticationStateProvider>();
+            services.AddScoped<AuthenticationStateProvider>(s => s.GetRequiredService<IdentityAuthenticationStateProvider>());
+            services.AddScoped<IAuthorizeApi, AuthorizeApi>();
+            //services.AddLoadingBar();
+            services.Add(new ServiceDescriptor(typeof(IUserProfileApi), typeof(UserProfileApi), ServiceLifetime.Scoped));
+            services.AddScoped<AppState>();
+            services.AddMatToaster(config =>
+            {
+                config.Position = MatToastPosition.BottomRight;
+                config.PreventDuplicates = true;
+                config.NewestOnTop = true;
+                config.ShowCloseButton = true;
+                config.MaximumOpacity = 95;
+                config.VisibleStateDuration = 3000;
+            });
+            //CSB End
+
             services.AddTransient<IEmailService, EmailService>();
             services.AddTransient<IUserProfileService, UserProfileService>();
             services.AddTransient<IApiLogService, ApiLogService>();
@@ -194,10 +255,10 @@ namespace BlazorBoilerplate.Server
             //    app.UseHsts(); //HSTS Middleware (UseHsts) to send HTTP Strict Transport Security Protocol (HSTS) headers to clients.
             //}
 
-            //app.UseStaticFiles();
-            app.UseClientSideBlazorFiles<Client.Startup>();
+            app.UseStaticFiles();
+            //app.UseClientSideBlazorFiles<Client.Startup>();
 
-            //app.UseHttpsRedirection();
+            app.UseHttpsRedirection();
             app.UseRouting();
             app.UseAuthentication();
             app.UseAuthorization();
@@ -206,12 +267,17 @@ namespace BlazorBoilerplate.Server
             app.UseOpenApi();
             app.UseSwaggerUi3();
 
+
+            WebAssemblyHttpMessageHandler.DefaultCredentials = FetchCredentialsOption.Include;
+            //clientApp.UseLoadingBar();
             app.UseEndpoints(endpoints =>
             {
                 endpoints.MapDefaultControllerRoute();
+                endpoints.MapBlazorHub();
                 // new SignalR endpoint routing setup
                 endpoints.MapHub<Hubs.ChatHub>("/chathub");
-                endpoints.MapFallbackToClientSideBlazor<Client.Startup>("index.html");
+                //endpoints.MapFallbackToClientSideBlazor<Client.Startup>("index.html");
+                endpoints.MapFallbackToPage("/_Host");
             });
 
             //Seed Database
